@@ -49,15 +49,24 @@ and the session is stored so every other command works immediately:
 dododentist signup --email dentist@example.com --json
 ```
 
-Two ways to authenticate an existing account; both persist in
+Three ways to authenticate an existing account; all persist in
 `~/.dododentist/`:
 
 ```bash
-dododentist login               # interactive: choose browser or API key
+dododentist login               # interactive: choose browser, another device or API key
 dododentist login --browser     # opens app.dododentist.com to authorize; stores session tokens
+dododentist login --device      # prints a link, a QR code and a one-time code to approve elsewhere
 dododentist login --with-key    # masked prompt for an API key secret; verified before storing
 dododentist logout              # clears the stored session and any stored key
 ```
+
+`dododentist login --device` needs neither a browser on this machine nor a
+terminal: it prints a link such as
+`https://app.dododentist.com/cli?code=WDJB-MJHT` and waits up to ten minutes.
+When you run it for someone, give them the link and the code; they approve it on
+their phone or computer while signed in to DodoDentist, and the command finishes
+on its own with a browser session. Use it on remote desktops, SSH sessions and
+servers, where the browser flow cannot reach the terminal's machine.
 
 Headless agents skip `login` entirely: export
 `DODODENTIST_API_KEY=<key secret>` and every command authenticates with it.
@@ -150,15 +159,29 @@ dododentist appointments read <appointmentId>
 
 dododentist appointments add --clinicId <id> --patientId <id> \
   --startTime 2026-09-01T09:00:00.000Z --endTime 2026-09-01T09:30:00.000Z
+dododentist appointments add --clinicId <id> --patientId <id> --status TO_SCHEDULE --duration 60
 dododentist appointments update <appointmentId> --startTime 2026-09-02T09:00:00.000Z
+dododentist appointments update <appointmentId> --status SCHEDULED \
+  --startTime 2026-09-03T09:00:00.000Z --endTime 2026-09-03T10:00:00.000Z
 dododentist appointments update <appointmentId> --status CANCELED
 dododentist appointments delete <appointmentId>
 ```
 
 Times are ISO 8601 instants. `--startTime` matches appointments starting at or
 after that instant and `--endTime` those ending strictly before it, so a range
-needs both. Statuses are `REQUESTED`, `SCHEDULED` (the default),
-`PATIENT_ARRIVED`, `NO_SHOW` and `CANCELED`.
+needs both. Statuses are `REQUESTED`, `TO_SCHEDULE`, `SCHEDULED` (the
+default), `PATIENT_ARRIVED`, `NO_SHOW` and `CANCELED`.
+
+`TO_SCHEDULE` is a visit the dentist planned that the front desk has not dated
+yet. It has no `startTime` or `endTime` (the API removes them) and may carry
+`duration`, its planned length in whole minutes (5–1440). It holds no slot,
+sends the patient nothing and is not a visit in any report, and webhooks hear
+nothing of it until it has a date. `add --status TO_SCHEDULE` takes no times.
+To book it, `update <id> --status SCHEDULED` with both `--startTime` and
+`--endTime`: leaving `TO_SCHEDULE` for any status but `CANCELED` without both
+is refused with `400`. A list filtered by `--startTime`/`--endTime` never
+returns one, because it has no times; list the patient's appointments without
+time filters to find them (without `--json` they read `no date`).
 
 Cancelling is usually `update --status CANCELED`, which keeps the record and
 its history; `delete` removes it outright and drops its scheduled reminders.
@@ -250,5 +273,6 @@ testing against a non-production deployment.
 | `missing clinicId` on a write          | Pass `--clinicId`, or use a key locked to one clinic                   |
 | `404` on a record you can see elsewhere | It belongs to another organization, or to a clinic outside the key's scope |
 | `402` when booking                     | The clinic hit its plan's monthly appointment limit — upgrade, or edit an existing appointment instead |
+| `400` booking a `TO_SCHEDULE` appointment | Give it both `--startTime` and `--endTime` along with `--status SCHEDULED` |
 | `429` on a burst of calls              | Per-key rate limit — slow down and batch with filters instead of looping |
 | `list` returns unsorted results        | `--sortField` was not one this endpoint allows; it is ignored, not rejected |
